@@ -2,6 +2,7 @@
 实现类似于excel vlookup, 以及文件列对齐等功能
 
 
+```python
   -i -o -s file       输入/输出文件/数据库文件;默认 sys.stdin/stdout/FILE
   -n 1:1             oncol; infile:data; e.g  1,2,3:1,2,3
   -f 1:1             savecol; infile:data; e.g 1-50:1-50
@@ -34,3 +35,4 @@
   --count            -t连用, 统计values中个数
   --mean             -t连用, 计算values中元素均值
   --sd               -t连用, 计算values中元素方差
+```
