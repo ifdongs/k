@@ -6,7 +6,7 @@
   -i -o -s file       输入/输出文件/数据库文件;默认 sys.stdin/stdout/FILE
   -n 1:1             oncol; infile:data;   例如: 1,2,3:1,2,3
   -f 1:1             savecol; infile:data; 例如: 1-50:1-50
-  --fs 3:::1,2       指定列分割提取; 第三列按:分割,提取其中的1,2填充会源数据中
+  --fs 3:::1,2       指定列分割提取; 第三列按:分割,提取其中的1,2填充回源数据中
   -d '\t'            delimiter; default: '\s:\t'
   -m                 启用模糊匹配
   -M                 启用最佳相似度匹配
