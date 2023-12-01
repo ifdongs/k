@@ -13,12 +13,13 @@ _MAXC=500  # 最大列数
 
 hinfo='''helpinfo:
   -i -o -s file       输入/输出文件/数据库文件;默认 sys.stdin/stdout/FILE
-  -n 1:1             oncol; infile:data; e.g  1,2,3:1,2,3
-  -f 1:1             savecol; infile:data; e.g 1-50:1-50
+  -n 1:1             oncol; infile:data;   例如: 1,2,3:1,2,3
+  -f 1:1             savecol; infile:data; 例如: 1-50:1-50
+  --fs 3:::1,2       指定列分割提取; 第三列按:分割,提取其中的1,2填充会源数据中
   -d '\\t'            delimiter; default: '\\s:\\t'
   -m                 启用模糊匹配
   -M                 启用最佳相似度匹配
-  -a                 显示所有的行(默认只实现匹配到的)
+  -a                 显示所有的行(默认只显示匹配的)
   -v                 取反;输出infile没有匹配到的行
   -r,--rep           data前两列k-v和v-k替换infile中值
   -c int             是否展示两个文件格式化列序号;int列宽
@@ -26,16 +27,18 @@ hinfo='''helpinfo:
   -H h1,h2           -T连用, 打印每行前先打印表头
   -x 2               将所有数据分割之后,按每行2个打印输出(相当于xargs -n2)
 
-  --melt             宽数据转长数据: 保留列:值列:类别表头:值表头(没写的值列将舍弃)
+  --melt             宽转长: 保留列:值列:类别表头:值表头(没写的值列将舍弃)
+  --pivot            长转宽: 保留列索引:放在表头的列:内容列(长转宽)
   -p strip|swarm|box|boxen|violin|bar|point   ===类别作图===
-     x,y:坐标轴  hue:图例分类 row,col:行列子图分类;palette:Greens,summer,summer_r,rainbow...
-     dodge:增加图例分类x轴一类会分成多类并列:dodge:False合并成一类
                      strip:散点图 swarm:树状散点图
                      box:箱线图 boxen:增强箱线图 violin:小提琴图
                      bar:均值柱状图 point:均值折线图
      hist|kde|ecdf   hist:直方图 kde:密度图 ecdf:经验累积分布
      line|scatter    x-y:1-2列:映射关系图
   --kw               作图参数: 格式: k:v,K:V,...
+    x,y:坐标轴           hue:图例分类
+    row,col:行列子图分类  palette:Greens,summer,summer_r,rainbow...
+    dodge:增加图例分类x轴一类会分成多类并列, dodge:False合并成一类
 
   -t 1:2-            转置; 默认k,v: 1:2-
   --uniq             -t连用, 对values中的元素去重
@@ -43,7 +46,11 @@ hinfo='''helpinfo:
   --sum              -t连用, 对values中的元素求和
   --count            -t连用, 统计values中个数
   --mean             -t连用, 计算values中元素均值
-  --sd               -t连用, 计算values中元素方差'''
+  --sd               -t连用, 计算values中元素方差
+
+  --info 4,5,6       将类似vcf INFO列转化成表头形式(待合并,该需求需要表头,与上面的功能有点差别)
+  --fmt 4,5,6        将类似vcf FORMAT列转化成表头形式'''
+
 
 def minMaxNorm(lst):
     _lst = [float(i)for i in lst]
@@ -65,6 +72,7 @@ def convert_percent_to_decimal(df):
                 df[column] = df[column].str.rstrip('%').astype(float) / 100
     return df
 
+
 # 将1-3,7- 转化成: [1,2,3,7,...]
 def colParser(colsInfo, maxIdx=_MAXC):
     lst = []
@@ -82,7 +90,7 @@ def colParser(colsInfo, maxIdx=_MAXC):
     lst = [ i-1 for i in lst if i<=maxIdx]
     return lst
 
-
+# 用于格式化打印展示, 类似于column -t的功能
 def pretty(iLst, maxNF, colWidthMax=85, displayColsIndex=True):
     if iLst==[]:return []
     if displayColsIndex:
@@ -97,6 +105,7 @@ def pretty(iLst, maxNF, colWidthMax=85, displayColsIndex=True):
     return [''.join([line[i].ljust(colWidthLst[i], ' ')[:colWidthMax]+'  '
             for i in range(maxNF)]) for line in iLst ]
 
+# 展平嵌套元素, 例如[1,2,3,[1,2,3]]--> [1,2,3,1,2,3]
 def flatten(items, ignore=(str, bytes)):
     from collections.abc import Iterable
     for x in items:
@@ -105,16 +114,45 @@ def flatten(items, ignore=(str, bytes)):
         else:
             yield x
 
+# 统计两个字符串相似度
 def calculate_similarity(s1,s2):
     return SequenceMatcher(None, s1, s2).ratio()
-
-def bestMatch(s, lst):
+def bestMatch(s, lst):   #  "abc", ["abc", "ac", "a1c"]  #获取最佳匹配
     m,bs=0,''
     for s1 in lst:
         ratio=calculate_similarity(s,s1)
         if ratio>m:
             m,bs=ratio,s1
     return bs
+
+
+### 之前sidtrans功能 
+def info2dic(strings,dtype):
+    "AD:1,DP=2  VCF:INFO列中 将AD,DP转化成表头"
+    dic = {}
+    for i in strings.split(';'):
+        k,v = i.split('=')
+        v = resplit(r':|,', v)
+        if len(v)>1:
+            for n,_v in enumerate(v):
+                _k = dtype+k+str(n)
+                dic[_k]=_v
+        else:
+            dic[dtype+k]=v[0]
+    return dic
+
+def fmt2dic(keys, values ):
+    "AD:DP  1:2  VCF:FORMAT列中 将AD,DP转化成表头"
+    dic = {}
+    for k,v in zip( keys.split(':'), values.split(':') ):
+        v = resplit(r':|,', v)
+        if len(v)>1:
+            for n,_v in enumerate(v):
+                _k = k+str(n)
+                dic[_k]=_v
+        else:
+            dic[k]=v[0]
+    return dic
 
 def main():
     ## =================================== args ======================================== ### 
@@ -138,7 +176,7 @@ def main():
         if ':' in sep and ':' != sep:
             sep, osep = sep.split(':', 1)[:2]
 
-    ## infile
+    ## infile 转化成 iLst 列表形式
     iLst,maxiNF=[],0
     infile=sys.stdin
     if '-i' in args:
@@ -152,7 +190,7 @@ def main():
         if iLen>maxiNF:maxiNF=iLen
     iLst = [line+['']*(maxiNF-len(line)) for line in iLst] # 补全不完全的列
 
-    # data
+    # data  转化成  dLst 列表形式
     dLst,maxdNF=[],0
     data = open('/dev/null')
     if '-s' in args:
@@ -166,7 +204,7 @@ def main():
         if iLen>maxdNF:maxdNF=iLen
     dLst = [line+['']*(maxdNF-len(line)) for line in dLst]
 
-    # outfile
+    # outfile 
     outfile = sys.stdout
     if '-o' in args:
         outfile = args[args.index('-o')+1]
@@ -344,7 +382,8 @@ def main():
             if kind in {'strip', 'swarm', 'box', 'boxen', 'violin', 'bar', 'point'}:
                 if kind == 'bar': kwargs.update({'errwidth':2,'capsize':0.05})
                 df = convert_percent_to_decimal(df)  # 分数转化成小数
-                sns.catplot(data=df, kind=kind, **kwargs)  # aspect=2.5 长宽比2.5
+                # plt.figure(figsize=(15, 6))
+                sns.catplot(data=df, kind=kind, **kwargs)  # aspect=2.5 长宽比2.5, 调用figsize不起作用,可以设置长宽 比
             ## 分布作图(数据需要放在最后一列):
             if kind in {'hist', 'kde', 'ecdf'}:
                 sns.displot(data=df, kind=kind, **kwargs)
@@ -405,11 +444,36 @@ def main():
             scol1,scol2 = i.split(':') if ':' in i else [i,i]
             scol1,scol2 = colParser(scol1),colParser(scol2)
 
+        #   --fs 4:::1,2   第四列用:分割,取其中1,2子列
+        if '--fs' in args:
+            fsCol,fsSep,fsCS = '','',''
+            i = args[args.index('--fs')+1]
+            if ":::" in i:
+                fsSep=":"
+                fsCol,fsCS = i.replace(":::", ":").split(":")
+            else:
+                fsCol,fsSep,fsCS=i.split(":")
+            fsCol, fsCS=int(fsCol)-1, colParser(fsCS)
+
+
+        # --------------输入文件----------------
         indic = OrderedDict()        # 行号作为key保持输入文件顺序
         for n,i in enumerate(iLst):
+
+            _maxV = 0   # 先处理子列分割的, 填充回源数据导致最大列数改变
+            if '--fs' in args:
+                _lst = i[fsCol].split(fsSep)
+                _maxL = len(_lst)
+                _lst = [ _lst[j] if j+1<=_maxL else '-' for j in fsCS ]
+                i[fsCol] = _lst
+                i = list(flatten(i))
+                if _maxL>_maxV:_maxV=len(i)
+
+            if maxiNF<_maxV:maxiNF=_maxV
             indic[n] = [ osep.join( i[c] for c in col1),
                 [i[c] for c in scol1 if c<maxiNF] ]
 
+        # --------------数据库-----------------
         datadic = OrderedDict()
         for i in dLst:
             iLen = len(i)
@@ -462,5 +526,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
